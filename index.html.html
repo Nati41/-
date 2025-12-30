@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveFill v2 | Production</title>
+    
+    <!-- PDF.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // הגדרת Web Worker לביצועים גבוהים
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    
+    <style>
+        :root {
+            /* צבעים סמנטיים - LiveFill v2 Palette */
+            --c-primary: #2563EB;       /* כחול פעולה */
+            --c-primary-hover: #1D4ED8;
+            --c-success: #10B981;       /* ירוק תקין */
+            --c-warning: #F59E0B;       /* כתום אזהרה */
+            --c-danger: #EF4444;        /* אדום שגיאה/מחיקה */
+            
+            --c-bg-app: #F3F4F6;        /* רקע כללי */
+            --c-bg-panel: #FFFFFF;      /* רקע פאנלים */
+            --c-border: #E5E7EB;        /* גבולות עדינים */
+            --c-text-main: #1F2937;     /* טקסט ראשי */
+            --c-text-muted: #6B7280;    /* טקסט משני */
+
+            /* מידות */
+            --h-toolbar: 64px;
+            --w-sidebar: 280px;
+        }
+
+        /* --- Base & Reset --- */
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            color: var(--c-text-main);
+            background: var(--c-bg-app);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- 1. Toolbar (Top) --- */
+        .toolbar {
+            height: var(--h-toolbar);
+            background: var(--c-bg-panel);
+            border-bottom: 1px solid var(--c-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+
+        .toolbar-group { display: flex; gap: 12px; align-items: center; }
+
+        /* כפתורים בסיסיים */
+        button {
+            font-family: inherit;
+            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--c-border);
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--c-text-main);
+        }
+        button:hover { background: #F9FAFB; border-color: #D1D5DB; }
+        button:active { transform: translateY(1px); }
+
+        /* כפתור הפעולה הראשי (ייצוא) */
+        button.primary-action {
+            background: var(--c-primary);
+            color: white;
+            border: none;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+        }
+        button.primary-action:hover:not(:disabled) { background: var(--c-primary-hover); }
+        button.primary-action:disabled {
+            background: #E5E7EB;
+            color: #9CA3AF;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* זום סלקט */
+        select#zoom-control {
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--c-border);
+            background: white;
+            font-size: 14px;
+        }
+
+        /* --- 2. Layout (Sidebar + Workspace) --- */
+        .app-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--w-sidebar);
+            background: var(--c-bg-panel);
+            border-left: 1px solid var(--c-border);
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--c-border);
+        }
+        .sidebar-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+
+        .field-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* פריט שדה ברשימה */
+        .field-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--c-border);
+            cursor: pointer;
+            transition: background 0.1s;
+            font-size: 14px;
+        }
+        .field-item:hover { background: #F3F4F6; }
+        .field-item.active { background: #EFF6FF; border-right: 3px solid var(--c-primary); }
+
+        /* סטטוסים ברשימה */
+        .status-empty .field-status-icon { color: #D1D5DB; }
+        .status-ok .field-status-icon { color: var(--c-success); }
+        .status-warning .field-status-icon { color: var(--c-warning); }
+
+        /* --- 3. Workspace (Canvas Area) --- */
+        .workspace {
+            flex: 1;
+            background: #E5E5E5;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        /* הקונטיינר שעוטף את ה-PDF והשדות - zoom via CSS transform */
+        .canvas-container {
+            position: relative;
+            background: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transform-origin: top center;
+            /* No transition - instant zoom */
+        }
+
+        /* Layer 1: PDF Canvas */
+        .pdf-layer {
+            display: block;
+            /* CRITICAL: No max-width - canvas size must not be constrained */
+            /* image-rendering ensures crisp pixels on zoom */
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+        }
+
+        /* Layer 2: Fields Overlay */
+        .overlay-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* --- 4. The Fields (Injectable Elements) --- */
+        .lf-field {
+            position: absolute;
+            pointer-events: auto;
+            border: 1px solid rgba(37, 99, 235, 0.3);
+            background: rgba(37, 99, 235, 0.05);
+            border-radius: 3px;
+            cursor: text;
+            display: flex;
+            align-items: center;
+            padding: 0 4px;
+            font-size: 12px;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .lf-field:hover {
+            background: rgba(37, 99, 235, 0.15);
+            border-color: var(--c-primary);
+        }
+
+        .lf-field.status-filled { border-color: var(--c-success); background: rgba(16, 185, 129, 0.1); }
+        .lf-field.status-overflow { border-color: var(--c-warning); background: rgba(245, 158, 11, 0.1); }
+
+        /* --- 5. Popover (Dialog) --- */
+        dialog {
+            border: none;
+            border-radius: 12px;
+            padding: 0;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            width: 400px;
+            max-width: 90vw;
+        }
+        dialog::backdrop {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(2px);
+        }
+
+        .popover-content { padding: 24px; }
+        .popover-content input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid var(--c-border);
+            border-radius: 6px;
+            outline: none;
+            margin-bottom: 16px;
+            text-align: right;
+        }
+        .popover-content input:focus { border-color: var(--c-primary); }
+
+        /* ויזואליזציה של Slots */
+        .slots-visualizer {
+            display: flex;
+            gap: 4px;
+            direction: ltr;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .slot-box {
+            width: 24px;
+            height: 32px;
+            border: 1px solid #9CA3AF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            font-size: 18px;
+            background: #F9FAFB;
+        }
+        .slot-box.filled { background: white; border-color: var(--c-text-main); font-weight: bold; }
+
+        .popover-actions {
+            background: #F9FAFB;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            border-top: 1px solid var(--c-border);
+        }
+        .btn-text { border: none; background: transparent; padding: 8px; font-size: 16px; }
+        .btn-secondary { background: white; color: var(--c-text-main); }
+        .btn-primary { background: var(--c-primary); color: white; border: none; }
+
+        /* --- 6. Empty State --- */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--c-text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+        .empty-state-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+        .empty-state-text { font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <!-- Top Toolbar -->
+    <header class="toolbar">
+        <div class="toolbar-group">
+            <button id="btn-upload-pdf">📄 העלה PDF</button>
+            <button id="btn-upload-map">📋 העלה מיפוי</button>
+        </div>
+
+        <div class="toolbar-group">
+            <select id="zoom-control">
+                <option value="1">100%</option>
+                <option value="1.5">150%</option>
+                <option value="2">200%</option>
+            </select>
+        </div>
+
+        <div class="toolbar-group">
+            <button id="btn-export" class="primary-action" disabled>📤 ייצא PDF</button>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="app-layout">
+
+        <!-- Right Sidebar (RTL) -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>רשימת שדות</h3>
+            </div>
+
+            <ul class="field-list">
+                <!-- Will be populated by JS -->
+            </ul>
+        </aside>
+
+        <!-- Workspace -->
+        <main class="workspace">
+            <div id="canvas-container" class="canvas-container">
+                <!-- PDF Layer (rendered as high-DPI PNG image) -->
+                <img id="pdf-render" class="pdf-layer">
+
+                <!-- Fields Overlay Layer -->
+                <div id="fields-overlay" class="overlay-layer">
+                    <!-- Fields will be injected here by JS -->
+                </div>
+                
+                <!-- Empty State (shown when no PDF loaded) -->
+                <div id="empty-state" class="empty-state">
+                    <div class="empty-state-icon">📄</div>
+                    <div class="empty-state-text">העלה PDF כדי להתחיל</div>
+                </div>
+            </div>
+        </main>
+
+    </div>
+
+    <!-- Slot Editor Dialog -->
+    <dialog id="slot-editor">
+        <form method="dialog">
+            <div class="popover-content">
+                <h4 id="popover-title">שם השדה</h4>
+                <input type="text" id="slot-input" autocomplete="off" placeholder="הקלד כאן...">
+                <div class="slots-visualizer">
+                    <!-- Slot boxes will be injected here by JS -->
+                </div>
+                <div class="overflow-warning" hidden>⚠️ הטקסט ארוך מדי</div>
+            </div>
+
+            <div class="popover-actions">
+                <button type="submit" value="clear" class="btn-text">🗑️</button>
+                <button type="submit" value="cancel" class="btn-secondary">❌ ביטול</button>
+                <button type="submit" value="confirm" class="btn-primary">✔️ אישור</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Hidden file inputs for upload buttons -->
+    <input type="file" id="input-pdf" accept=".pdf" hidden>
+    <input type="file" id="input-map" accept=".json" hidden>
+
+    <!-- Core Engine -->
+    <script>
+    /* LiveFill v2 | Core Engine */
+
+    const AppState = {
+        pdfDoc: null,
+        pageNum: 1,
+        scale: 1.0,              // Zoom level (1.0 = 100%)
+        viewport: null,          // PDF.js viewport (for overlay positioning)
+        mappingData: [],         // fields[] from JSON
+        tablesData: [],          // tables[] from JSON
+        fieldValues: {},         // User input values
+        activeFieldId: null
+    };
+
+    // ===== Rendering Constants =====
+    const PDF_DPI = 72;        // PDF.js default DPI
+    const RENDER_DPI = 300;    // High-quality render DPI (sharp output)
+
+    // אלמנטים ב-DOM
+    const els = {
+        canvasContainer: document.getElementById('canvas-container'),
+        pdfImage: document.getElementById('pdf-render'),  // Now an <img>, not canvas
+        overlay: document.getElementById('fields-overlay'),
+        zoomSelect: document.getElementById('zoom-control'),
+        fieldList: document.querySelector('.field-list'),
+        slotDialog: document.getElementById('slot-editor'),
+        slotInput: document.getElementById('slot-input'),
+        popoverTitle: document.getElementById('popover-title'),
+        btnExport: document.getElementById('btn-export'),
+        emptyState: document.getElementById('empty-state')
+    };
+
+    /* --- 1. אתחול והעלאת קבצים --- */
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // חיבור כפתורי העלאה
+        setupUploadButton('btn-upload-pdf', 'input-pdf', handlePdfUpload);
+        setupUploadButton('btn-upload-map', 'input-map', handleMapUpload);
+        
+        // Zoom via CSS transform only - NO re-render!
+        els.zoomSelect.addEventListener('change', (e) => {
+            AppState.scale = parseFloat(e.target.value);
+            applyZoom(AppState.scale);
+        });
+
+        // חיבור דיאלוג (שמירה ביציאה)
+        els.slotDialog.addEventListener('close', handleDialogClose);
+    });
+
+    function setupUploadButton(btnId, inputId, handler) {
+        const btn = document.getElementById(btnId);
+        const input = document.getElementById(inputId);
+        btn.addEventListener('click', () => input.click());
+        input.addEventListener('change', handler);
+    }
+
+    /* --- 2. מנוע PDF --- */
+
+    async function handlePdfUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const fileReader = new FileReader();
+        fileReader.onload = async function() {
+            const typedarray = new Uint8Array(this.result);
+            AppState.pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+            
+            // הסתרת Empty State
+            els.emptyState.style.display = 'none';
+
+            // טוען דף ראשון אוטומטית
+            AppState.pageNum = 1;
+            await renderPage();
+
+            // Render overlays only if mapping JSON was already loaded
+            if (AppState.mappingData.length > 0) {
+                renderOverlayFields();
+                renderSidebarList();
+            }
+        };
+        fileReader.readAsArrayBuffer(file);
+    }
+
+    /**
+     * Apply zoom via CSS transform - NO re-rendering!
+     */
+    function applyZoom(zoom) {
+        els.canvasContainer.style.transform = `scale(${zoom})`;
+        els.canvasContainer.style.transformOrigin = 'top center';
+    }
+
+    /**
+     * Render PDF ONCE at 300 DPI - called only on PDF load, never on zoom
+     */
+    async function renderPage() {
+        if (!AppState.pdfDoc) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        const page = await AppState.pdfDoc.getPage(AppState.pageNum);
+
+        // Display viewport at scale 1.0 - for CSS size and overlay positioning
+        const displayViewport = page.getViewport({ scale: 1.0 });
+        AppState.viewport = displayViewport;
+
+        // Render viewport at 300 DPI for sharp output
+        const renderScale = RENDER_DPI / PDF_DPI;  // 300/72 = 4.17
+        const renderViewport = page.getViewport({ scale: renderScale });
+
+        // Canvas at render resolution × dpr
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(renderViewport.width * dpr);
+        canvas.height = Math.floor(renderViewport.height * dpr);
+
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        await page.render({
+            canvasContext: ctx,
+            viewport: renderViewport
+        }).promise;
+
+        // Convert to PNG and display
+        const dataUrl = canvas.toDataURL('image/png');
+        els.pdfImage.src = dataUrl;
+
+        // CSS size = display viewport (NOT render viewport)
+        els.pdfImage.style.width = displayViewport.width + 'px';
+        els.pdfImage.style.height = displayViewport.height + 'px';
+
+        // Container matches display viewport
+        els.canvasContainer.style.width = displayViewport.width + 'px';
+        els.canvasContainer.style.height = displayViewport.height + 'px';
+
+        renderOverlayFields();
+
+        // Apply initial zoom
+        applyZoom(AppState.scale);
+    }
+
+    /* --- 3. מנוע מיפוי (Overlay) --- */
+
+    function handleMapUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const json = JSON.parse(event.target.result);
+
+                // Parse fields array
+                AppState.mappingData = json.fields || [];
+
+                // Parse tables array
+                AppState.tablesData = json.tables || [];
+
+                console.log(`Loaded mapping: ${AppState.mappingData.length} fields, ${AppState.tablesData.length} tables`);
+
+                // Render if PDF is already loaded
+                if (AppState.viewport) {
+                    renderOverlayFields();
+                }
+                renderSidebarList();
+
+            } catch (err) {
+                alert('שגיאה בטעינת קובץ המיפוי');
+                console.error(err);
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function renderOverlayFields() {
+        els.overlay.innerHTML = '';
+
+        if (!AppState.viewport) return;
+
+        // Viewport dimensions for positioning (CSS pixels)
+        const vpWidth = AppState.viewport.width;
+        const vpHeight = AppState.viewport.height;
+
+        // Render fields for current page only
+        AppState.mappingData
+            .filter(field => (field.page || 1) === AppState.pageNum)
+            .forEach(field => {
+                // bbox is normalized [x, y, w, h] in range 0..1
+                // PDF coordinate system: Y=0 at BOTTOM
+                // CSS coordinate system: Y=0 at TOP
+                const bbox = field.bbox;
+                if (!bbox || bbox.length < 4) return;
+
+                const [bx, by, bw, bh] = bbox;
+
+                const el = document.createElement('div');
+                el.className = `lf-field ${getFieldStatusClass(field.id)}`;
+                el.dataset.fieldId = field.id;
+
+                // Convert normalized bbox → CSS pixels
+                // X: direct mapping
+                // Y: flip from bottom-origin to top-origin
+                el.style.left   = `${bx * vpWidth}px`;
+                el.style.top    = `${(1 - by - bh) * vpHeight}px`;
+                el.style.width  = `${bw * vpWidth}px`;
+                el.style.height = `${bh * vpHeight}px`;
+
+                // Content
+                const value = AppState.fieldValues[field.id] || '';
+                el.innerText = value;
+
+                // Font size scaled to field height
+                const fontSizePx = Math.max(10, bh * vpHeight * 0.7);
+                el.style.fontSize = `${fontSizePx}px`;
+
+                el.onclick = () => openFieldEditor(field);
+                els.overlay.appendChild(el);
+            });
+
+        // Render table cells for current page
+        if (AppState.tablesData) {
+            AppState.tablesData
+                .filter(table => (table.page || 1) === AppState.pageNum)
+                .forEach(table => {
+                    if (!table.rows) return;
+                    table.rows.forEach((row, rowIndex) => {
+                        // Each row has column keys with bbox values
+                        Object.keys(row).forEach(colKey => {
+                            const cell = row[colKey];
+                            if (!cell || !cell.bbox) return;
+
+                            const [cx, cy, cw, ch] = cell.bbox;
+
+                            const cellEl = document.createElement('div');
+                            cellEl.className = 'lf-field table-cell';
+                            cellEl.dataset.tableId = table.id || table.tableId;
+                            cellEl.dataset.rowIndex = rowIndex;
+                            cellEl.dataset.colKey = colKey;
+
+                            // Y flipped from PDF (bottom-origin) to CSS (top-origin)
+                            cellEl.style.left   = `${cx * vpWidth}px`;
+                            cellEl.style.top    = `${(1 - cy - ch) * vpHeight}px`;
+                            cellEl.style.width  = `${cw * vpWidth}px`;
+                            cellEl.style.height = `${ch * vpHeight}px`;
+
+                            // Content from stored values
+                            const tableId = table.id || table.tableId;
+                            const cellValue = AppState.fieldValues?.tables?.[tableId]?.[rowIndex]?.[colKey] || '';
+                            cellEl.innerText = cellValue;
+
+                            const fontSizePx = Math.max(8, ch * vpHeight * 0.7);
+                            cellEl.style.fontSize = `${fontSizePx}px`;
+
+                            cellEl.onclick = () => openTableCellEditor(table, rowIndex, colKey);
+                            els.overlay.appendChild(cellEl);
+                        });
+                    });
+                });
+        }
+    }
+
+    function getFieldStatusClass(id) {
+        if (!AppState.fieldValues[id]) return '';
+        return 'status-filled';
+    }
+
+    function openTableCellEditor(table, rowIndex, colKey) {
+        // TODO: Implement table cell editor
+        console.log(`Edit table cell: ${table.id || table.tableId}[${rowIndex}][${colKey}]`);
+    }
+
+    /* --- 4. Sidebar Logic --- */
+
+    function renderSidebarList() {
+        els.fieldList.innerHTML = '';
+
+        // Filter fields for current page
+        const pageFields = AppState.mappingData.filter(f => (f.page || 1) === AppState.pageNum);
+
+        pageFields.forEach(field => {
+            const li = document.createElement('li');
+            li.className = 'field-item';
+            li.setAttribute('data-field-id', field.id);
+
+            const statusIcon = AppState.fieldValues[field.id] ? '✅' : '⬜';
+            const label = field.label_he || field.label || field.name || field.id;
+
+            li.innerHTML = `
+                <span class="field-name">${label}</span>
+                <span class="field-status-icon">${statusIcon}</span>
+            `;
+
+            li.onclick = () => {
+                document.querySelectorAll('.field-item').forEach(item => item.classList.remove('active'));
+                li.classList.add('active');
+                openFieldEditor(field);
+            };
+            els.fieldList.appendChild(li);
+        });
+    }
+
+    /* --- 5. עורך (Popover Logic) --- */
+
+    function openFieldEditor(field) {
+        AppState.activeFieldId = field.id;
+        const label = field.label_he || field.label || field.name || field.id;
+        els.popoverTitle.innerText = label;
+        els.slotInput.value = AppState.fieldValues[field.id] || '';
+
+        els.slotDialog.showModal();
+        setTimeout(() => els.slotInput.focus(), 50);
+    }
+
+    function handleDialogClose() {
+        const returnValue = els.slotDialog.returnValue; // 'confirm', 'cancel', 'clear'
+        
+        if (returnValue === 'confirm') {
+            const newVal = els.slotInput.value;
+            AppState.fieldValues[AppState.activeFieldId] = newVal;
+        } else if (returnValue === 'clear') {
+            delete AppState.fieldValues[AppState.activeFieldId];
+        }
+        // ב-cancel לא עושים כלום
+
+        // עדכון המערכת
+        renderOverlayFields();
+        renderSidebarList();
+        checkExportStatus();
+        
+        // איפוס ה-returnValue לפעם הבאה
+        els.slotDialog.returnValue = '';
+    }
+
+    function checkExportStatus() {
+        // הפעלת כפתור ייצוא רק אם יש לפחות שדה אחד מלא (לוגיקה בסיסית)
+        const hasData = Object.keys(AppState.fieldValues).length > 0;
+        els.btnExport.disabled = !hasData;
+    }
+    </script>
+
+</body>
+</html>
