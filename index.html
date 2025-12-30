@@ -1,710 +1,976 @@
 <!DOCTYPE html>
+
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LiveFill v2 | Production</title>
+
+```
+<!-- PDF.js Library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+    // Suppress fake worker warning (expected in sandboxed environments)
+    const originalWarn = console.warn;
+    console.warn = (...args) => {
+        if (args[0]?.includes?.('fake worker') || (typeof args[0] === 'string' && args[0].includes('Setting up fake worker'))) return;
+        originalWarn.apply(console, args);
+    };
     
-    <!-- PDF.js Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script>
-        // הגדרת Web Worker לביצועים גבוהים
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    </script>
+    // Set worker source
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+</script>
+
+<style>
+    :root {
+        --c-primary: #2563EB;
+        --c-primary-hover: #1D4ED8;
+        --c-success: #10B981;
+        --c-warning: #F59E0B;
+        --c-danger: #EF4444;
+        
+        --c-bg-app: #F3F4F6;
+        --c-bg-panel: #FFFFFF;
+        --c-border: #E5E7EB;
+        --c-text-main: #1F2937;
+        --c-text-muted: #6B7280;
+
+        --h-toolbar: 64px;
+        --w-sidebar: 280px;
+        
+        /* Mobile-specific */
+        --h-toolbar-mobile: 56px;
+        --h-bottom-nav: 60px;
+    }
+
+    * { box-sizing: border-box; }
     
-    <style>
-        :root {
-            /* צבעים סמנטיים - LiveFill v2 Palette */
-            --c-primary: #2563EB;       /* כחול פעולה */
-            --c-primary-hover: #1D4ED8;
-            --c-success: #10B981;       /* ירוק תקין */
-            --c-warning: #F59E0B;       /* כתום אזהרה */
-            --c-danger: #EF4444;        /* אדום שגיאה/מחיקה */
-            
-            --c-bg-app: #F3F4F6;        /* רקע כללי */
-            --c-bg-panel: #FFFFFF;      /* רקע פאנלים */
-            --c-border: #E5E7EB;        /* גבולות עדינים */
-            --c-text-main: #1F2937;     /* טקסט ראשי */
-            --c-text-muted: #6B7280;    /* טקסט משני */
+    body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: var(--c-text-main);
+        background: var(--c-bg-app);
+        height: 100vh;
+        height: 100dvh; /* Dynamic viewport height for mobile */
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
 
-            /* מידות */
-            --h-toolbar: 64px;
-            --w-sidebar: 280px;
-        }
+    /* === TOOLBAR === */
+    .toolbar {
+        height: var(--h-toolbar);
+        background: var(--c-bg-panel);
+        border-bottom: 1px solid var(--c-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        flex-shrink: 0;
+        z-index: 10;
+    }
 
-        /* --- Base & Reset --- */
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            font-family: system-ui, -apple-system, sans-serif;
-            color: var(--c-text-main);
-            background: var(--c-bg-app);
-            height: 100vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
+    .toolbar-group { display: flex; gap: 12px; align-items: center; }
 
-        /* --- 1. Toolbar (Top) --- */
+    button {
+        font-family: inherit;
+        font-size: 14px;
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--c-border);
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s;
+        color: var(--c-text-main);
+    }
+    button:hover { background: #F9FAFB; border-color: #D1D5DB; }
+    button:active { transform: translateY(1px); }
+
+    button.primary-action {
+        background: var(--c-primary);
+        color: white;
+        border: none;
+        font-weight: 600;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+    }
+    button.primary-action:hover:not(:disabled) { background: var(--c-primary-hover); }
+    button.primary-action:disabled {
+        background: #E5E7EB;
+        color: #9CA3AF;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
+    select#zoom-control {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--c-border);
+        background: white;
+        font-size: 14px;
+    }
+
+    /* Button text - hidden on mobile */
+    .btn-text-label { display: inline; }
+
+    /* === LAYOUT === */
+    .app-layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    /* === SIDEBAR (Desktop) === */
+    .sidebar {
+        width: var(--w-sidebar);
+        background: var(--c-bg-panel);
+        border-left: 1px solid var(--c-border);
+        display: flex;
+        flex-direction: column;
+        z-index: 5;
+    }
+
+    .sidebar-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--c-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .sidebar-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+
+    /* Close button - mobile only */
+    .sidebar-close {
+        display: none;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        font-size: 20px;
+        border: none;
+        background: transparent;
+    }
+
+    .field-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    .field-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--c-border);
+        cursor: pointer;
+        transition: background 0.1s;
+        font-size: 14px;
+    }
+    .field-item:hover { background: #F3F4F6; }
+    .field-item.active { background: #EFF6FF; border-right: 3px solid var(--c-primary); }
+
+    .status-empty .field-status-icon { color: #D1D5DB; }
+    .status-ok .field-status-icon { color: var(--c-success); }
+    .status-warning .field-status-icon { color: var(--c-warning); }
+
+    /* === WORKSPACE === */
+    .workspace {
+        flex: 1;
+        background: #E5E5E5;
+        overflow: auto;
+        display: flex;
+        justify-content: center;
+        padding: 40px;
+    }
+
+    .canvas-container {
+        position: relative;
+        background: white;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        transform-origin: top center;
+    }
+
+    .pdf-layer {
+        display: block;
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+    }
+
+    .overlay-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    /* === FIELDS === */
+    .lf-field {
+        position: absolute;
+        pointer-events: auto;
+        border: 1px solid rgba(37, 99, 235, 0.3);
+        background: rgba(37, 99, 235, 0.05);
+        border-radius: 3px;
+        cursor: text;
+        display: flex;
+        align-items: center;
+        padding: 0 4px;
+        font-size: 12px;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+
+    .lf-field:hover {
+        background: rgba(37, 99, 235, 0.15);
+        border-color: var(--c-primary);
+    }
+
+    .lf-field.status-filled { border-color: var(--c-success); background: rgba(16, 185, 129, 0.1); }
+    .lf-field.status-overflow { border-color: var(--c-warning); background: rgba(245, 158, 11, 0.1); }
+
+    /* === DIALOG (Desktop) === */
+    dialog {
+        border: none;
+        border-radius: 12px;
+        padding: 0;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        width: 400px;
+        max-width: 90vw;
+    }
+    dialog::backdrop {
+        background: rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(2px);
+    }
+
+    .popover-content { padding: 24px; }
+    .popover-content h4 { margin: 0 0 16px 0; font-size: 18px; }
+    
+    .popover-content input {
+        width: 100%;
+        padding: 10px;
+        font-size: 16px;
+        border: 2px solid var(--c-border);
+        border-radius: 6px;
+        outline: none;
+        margin-bottom: 16px;
+        text-align: right;
+    }
+    .popover-content input:focus { border-color: var(--c-primary); }
+
+    .slots-visualizer {
+        display: flex;
+        gap: 4px;
+        direction: ltr;
+        justify-content: center;
+        margin-bottom: 10px;
+    }
+    .slot-box {
+        width: 24px;
+        height: 32px;
+        border: 1px solid #9CA3AF;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: monospace;
+        font-size: 18px;
+        background: #F9FAFB;
+    }
+    .slot-box.filled { background: white; border-color: var(--c-text-main); font-weight: bold; }
+
+    .popover-actions {
+        background: #F9FAFB;
+        padding: 12px 24px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        border-top: 1px solid var(--c-border);
+    }
+    .btn-text { border: none; background: transparent; padding: 8px; font-size: 16px; }
+    .btn-secondary { background: white; color: var(--c-text-main); }
+    .btn-primary { background: var(--c-primary); color: white; border: none; }
+
+    /* === EMPTY STATE === */
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--c-text-muted);
+        text-align: center;
+        padding: 40px;
+    }
+    .empty-state-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+    .empty-state-text { font-size: 14px; }
+
+    /* === MOBILE BOTTOM NAV === */
+    .bottom-nav {
+        display: none; /* Hidden on desktop */
+        height: var(--h-bottom-nav);
+        background: var(--c-bg-panel);
+        border-top: 1px solid var(--c-border);
+        padding: 0 16px;
+        align-items: center;
+        justify-content: space-around;
+        flex-shrink: 0;
+        z-index: 10;
+    }
+
+    .bottom-nav button {
+        flex: 1;
+        max-width: 100px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 8px;
+        border: none;
+        background: transparent;
+        font-size: 11px;
+        color: var(--c-text-muted);
+    }
+    .bottom-nav button .nav-icon { font-size: 22px; }
+    .bottom-nav button.active { color: var(--c-primary); }
+
+    /* === BACKDROP for mobile sheets === */
+    .sheet-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 49;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .sheet-backdrop.visible {
+        display: block;
+        opacity: 1;
+    }
+
+    /* ============================================
+       MOBILE RESPONSIVE (< 768px)
+       ============================================ */
+    @media (max-width: 767px) {
+        /* Toolbar - compact */
         .toolbar {
-            height: var(--h-toolbar);
-            background: var(--c-bg-panel);
-            border-bottom: 1px solid var(--c-border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 24px;
-            flex-shrink: 0;
-            z-index: 10;
+            height: var(--h-toolbar-mobile);
+            padding: 0 12px;
         }
-
-        .toolbar-group { display: flex; gap: 12px; align-items: center; }
-
-        /* כפתורים בסיסיים */
+        .toolbar-group { gap: 8px; }
+        
+        /* Hide text labels, show only icons */
+        .btn-text-label { display: none; }
+        
         button {
-            font-family: inherit;
-            font-size: 14px;
-            padding: 8px 16px;
-            border-radius: 6px;
-            border: 1px solid var(--c-border);
-            background: white;
-            cursor: pointer;
-            transition: all 0.2s;
-            color: var(--c-text-main);
+            padding: 10px 12px;
+            font-size: 18px;
         }
-        button:hover { background: #F9FAFB; border-color: #D1D5DB; }
-        button:active { transform: translateY(1px); }
+        
+        /* Hide zoom on mobile - use pinch */
+        #zoom-control { display: none; }
+        
+        /* Hide desktop export button - will be in bottom nav */
+        #btn-export { display: none; }
 
-        /* כפתור הפעולה הראשי (ייצוא) */
-        button.primary-action {
-            background: var(--c-primary);
-            color: white;
-            border: none;
-            font-weight: 600;
-            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
-        }
-        button.primary-action:hover:not(:disabled) { background: var(--c-primary-hover); }
-        button.primary-action:disabled {
-            background: #E5E7EB;
-            color: #9CA3AF;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-
-        /* זום סלקט */
-        select#zoom-control {
-            padding: 6px 12px;
-            border-radius: 6px;
-            border: 1px solid var(--c-border);
-            background: white;
-            font-size: 14px;
-        }
-
-        /* --- 2. Layout (Sidebar + Workspace) --- */
-        .app-layout {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-
-        /* Sidebar */
+        /* Sidebar becomes bottom sheet */
         .sidebar {
-            width: var(--w-sidebar);
-            background: var(--c-bg-panel);
-            border-left: 1px solid var(--c-border);
-            display: flex;
-            flex-direction: column;
-            z-index: 5;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            width: 100%;
+            height: 60vh;
+            max-height: calc(100dvh - var(--h-toolbar-mobile) - var(--h-bottom-nav));
+            border-left: none;
+            border-top: 1px solid var(--c-border);
+            border-radius: 16px 16px 0 0;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-out;
+            z-index: 50;
         }
-
+        .sidebar.open {
+            transform: translateY(0);
+        }
+        
         .sidebar-header {
-            padding: 16px;
-            border-bottom: 1px solid var(--c-border);
-        }
-        .sidebar-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
-
-        .field-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            overflow-y: auto;
-            flex: 1;
-        }
-
-        /* פריט שדה ברשימה */
-        .field-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             padding: 12px 16px;
             border-bottom: 1px solid var(--c-border);
-            cursor: pointer;
-            transition: background 0.1s;
-            font-size: 14px;
         }
-        .field-item:hover { background: #F3F4F6; }
-        .field-item.active { background: #EFF6FF; border-right: 3px solid var(--c-primary); }
-
-        /* סטטוסים ברשימה */
-        .status-empty .field-status-icon { color: #D1D5DB; }
-        .status-ok .field-status-icon { color: var(--c-success); }
-        .status-warning .field-status-icon { color: var(--c-warning); }
-
-        /* --- 3. Workspace (Canvas Area) --- */
-        .workspace {
-            flex: 1;
-            background: #E5E5E5;
-            overflow: auto;
-            display: flex;
-            justify-content: center;
-            padding: 40px;
-        }
-
-        /* הקונטיינר שעוטף את ה-PDF והשדות - zoom via CSS transform */
-        .canvas-container {
-            position: relative;
-            background: white;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            transform-origin: top center;
-            /* No transition - instant zoom */
-        }
-
-        /* Layer 1: PDF Canvas */
-        .pdf-layer {
+        
+        /* Drag handle indicator */
+        .sidebar-header::before {
+            content: '';
             display: block;
-            /* CRITICAL: No max-width - canvas size must not be constrained */
-            /* image-rendering ensures crisp pixels on zoom */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
+            width: 40px;
+            height: 4px;
+            background: #D1D5DB;
+            border-radius: 2px;
+            margin: 0 auto 12px;
         }
-
-        /* Layer 2: Fields Overlay */
-        .overlay-layer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
+        
+        .sidebar-close {
+            display: block;
         }
-
-        /* --- 4. The Fields (Injectable Elements) --- */
-        .lf-field {
-            position: absolute;
-            pointer-events: auto;
-            border: 1px solid rgba(37, 99, 235, 0.3);
-            background: rgba(37, 99, 235, 0.05);
-            border-radius: 3px;
-            cursor: text;
-            display: flex;
-            align-items: center;
-            padding: 0 4px;
-            font-size: 12px;
-            overflow: hidden;
-            white-space: nowrap;
-        }
-
-        .lf-field:hover {
-            background: rgba(37, 99, 235, 0.15);
-            border-color: var(--c-primary);
-        }
-
-        .lf-field.status-filled { border-color: var(--c-success); background: rgba(16, 185, 129, 0.1); }
-        .lf-field.status-overflow { border-color: var(--c-warning); background: rgba(245, 158, 11, 0.1); }
-
-        /* --- 5. Popover (Dialog) --- */
-        dialog {
-            border: none;
-            border-radius: 12px;
-            padding: 0;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            width: 400px;
-            max-width: 90vw;
-        }
-        dialog::backdrop {
-            background: rgba(0, 0, 0, 0.3);
-            backdrop-filter: blur(2px);
-        }
-
-        .popover-content { padding: 24px; }
-        .popover-content input {
-            width: 100%;
-            padding: 10px;
+        
+        .field-item {
+            padding: 16px;
             font-size: 16px;
-            border: 2px solid var(--c-border);
-            border-radius: 6px;
-            outline: none;
-            margin-bottom: 16px;
-            text-align: right;
         }
-        .popover-content input:focus { border-color: var(--c-primary); }
 
-        /* ויזואליזציה של Slots */
-        .slots-visualizer {
-            display: flex;
-            gap: 4px;
-            direction: ltr;
-            justify-content: center;
-            margin-bottom: 10px;
+        /* Workspace - full width, less padding */
+        .workspace {
+            padding: 16px;
+            padding-bottom: calc(16px + var(--h-bottom-nav));
         }
-        .slot-box {
-            width: 24px;
-            height: 32px;
-            border: 1px solid #9CA3AF;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: monospace;
-            font-size: 18px;
-            background: #F9FAFB;
-        }
-        .slot-box.filled { background: white; border-color: var(--c-text-main); font-weight: bold; }
 
-        .popover-actions {
-            background: #F9FAFB;
-            padding: 12px 24px;
+        /* Bottom navigation */
+        .bottom-nav {
             display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-            border-top: 1px solid var(--c-border);
         }
-        .btn-text { border: none; background: transparent; padding: 8px; font-size: 16px; }
-        .btn-secondary { background: white; color: var(--c-text-main); }
-        .btn-primary { background: var(--c-primary); color: white; border: none; }
 
-        /* --- 6. Empty State --- */
-        .empty-state {
+        /* Dialog - full screen on mobile */
+        dialog {
+            width: 100%;
+            max-width: 100%;
+            height: 100%;
+            max-height: 100%;
+            border-radius: 0;
+            margin: 0;
+        }
+        dialog[open] {
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: var(--c-text-muted);
-            text-align: center;
-            padding: 40px;
         }
-        .empty-state-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+        
+        .popover-content {
+            flex: 1;
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+        }
+        .popover-content h4 {
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+        .popover-content input {
+            font-size: 18px;
+            padding: 14px;
+        }
+
+        .popover-actions {
+            padding: 16px;
+            gap: 12px;
+        }
+        .popover-actions button {
+            padding: 14px 20px;
+            font-size: 16px;
+        }
+        .btn-primary {
+            flex: 1;
+        }
+
+        /* Fields - larger touch targets */
+        .lf-field {
+            min-height: 32px;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 20px;
+        }
+        .empty-state-icon { font-size: 40px; }
         .empty-state-text { font-size: 14px; }
-    </style>
+    }
+
+    /* Small phones */
+    @media (max-width: 380px) {
+        .toolbar {
+            padding: 0 8px;
+        }
+        button {
+            padding: 8px 10px;
+        }
+        .bottom-nav button {
+            font-size: 10px;
+        }
+    }
+</style>
+```
+
 </head>
 <body>
 
-    <!-- Top Toolbar -->
-    <header class="toolbar">
-        <div class="toolbar-group">
-            <button id="btn-upload-pdf">📄 העלה PDF</button>
-            <button id="btn-upload-map">📋 העלה מיפוי</button>
-        </div>
-
-        <div class="toolbar-group">
-            <select id="zoom-control">
-                <option value="1">100%</option>
-                <option value="1.5">150%</option>
-                <option value="2">200%</option>
-            </select>
-        </div>
-
-        <div class="toolbar-group">
-            <button id="btn-export" class="primary-action" disabled>📤 ייצא PDF</button>
-        </div>
-    </header>
-
-    <!-- Main Layout -->
-    <div class="app-layout">
-
-        <!-- Right Sidebar (RTL) -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <h3>רשימת שדות</h3>
-            </div>
-
-            <ul class="field-list">
-                <!-- Will be populated by JS -->
-            </ul>
-        </aside>
-
-        <!-- Workspace -->
-        <main class="workspace">
-            <div id="canvas-container" class="canvas-container">
-                <!-- PDF Layer (rendered as high-DPI PNG image) -->
-                <img id="pdf-render" class="pdf-layer">
-
-                <!-- Fields Overlay Layer -->
-                <div id="fields-overlay" class="overlay-layer">
-                    <!-- Fields will be injected here by JS -->
-                </div>
-                
-                <!-- Empty State (shown when no PDF loaded) -->
-                <div id="empty-state" class="empty-state">
-                    <div class="empty-state-icon">📄</div>
-                    <div class="empty-state-text">העלה PDF כדי להתחיל</div>
-                </div>
-            </div>
-        </main>
-
+```
+<!-- Top Toolbar -->
+<header class="toolbar">
+    <div class="toolbar-group">
+        <button id="btn-upload-pdf"><span style="font-weight:bold">PDF</span><span class="btn-text-label"> העלה</span></button>
+        <button id="btn-upload-map"><span style="font-weight:bold">JSON</span><span class="btn-text-label"> מיפוי</span></button>
     </div>
 
-    <!-- Slot Editor Dialog -->
-    <dialog id="slot-editor">
-        <form method="dialog">
-            <div class="popover-content">
-                <h4 id="popover-title">שם השדה</h4>
-                <input type="text" id="slot-input" autocomplete="off" placeholder="הקלד כאן...">
-                <div class="slots-visualizer">
-                    <!-- Slot boxes will be injected here by JS -->
-                </div>
-                <div class="overflow-warning" hidden>⚠️ הטקסט ארוך מדי</div>
+    <div class="toolbar-group">
+        <select id="zoom-control">
+            <option value="1">100%</option>
+            <option value="1.5">150%</option>
+            <option value="2">200%</option>
+        </select>
+    </div>
+
+    <div class="toolbar-group">
+        <button id="btn-export" class="primary-action" disabled><span class="btn-text-label">ייצא PDF</span><span class="btn-icon-only" style="display:none">ייצוא</span></button>
+    </div>
+</header>
+
+<!-- Main Layout -->
+<div class="app-layout">
+
+    <!-- Backdrop for mobile sheets -->
+    <div id="sheet-backdrop" class="sheet-backdrop"></div>
+
+    <!-- Sidebar / Bottom Sheet -->
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h3>רשימת שדות</h3>
+            <button id="sidebar-close" class="sidebar-close">✕</button>
+        </div>
+        <ul class="field-list">
+            <!-- Populated by JS -->
+        </ul>
+    </aside>
+
+    <!-- Workspace -->
+    <main class="workspace">
+        <div id="canvas-container" class="canvas-container">
+            <img id="pdf-render" class="pdf-layer">
+            <div id="fields-overlay" class="overlay-layer"></div>
+            <div id="empty-state" class="empty-state">
+                <div class="empty-state-icon">PDF</div>
+                <div class="empty-state-text">העלה PDF כדי להתחיל</div>
             </div>
+        </div>
+    </main>
 
-            <div class="popover-actions">
-                <button type="submit" value="clear" class="btn-text">🗑️</button>
-                <button type="submit" value="cancel" class="btn-secondary">❌ ביטול</button>
-                <button type="submit" value="confirm" class="btn-primary">✔️ אישור</button>
+</div>
+
+<!-- Mobile Bottom Navigation -->
+<nav class="bottom-nav">
+    <button id="nav-fields">
+        <span class="nav-icon">☰</span>
+        <span>שדות</span>
+    </button>
+    <button id="nav-zoom-out">
+        <span class="nav-icon">−</span>
+        <span>הקטן</span>
+    </button>
+    <button id="nav-zoom-in">
+        <span class="nav-icon">+</span>
+        <span>הגדל</span>
+    </button>
+    <button id="nav-export" class="primary-action" disabled>
+        <span class="nav-icon">↑</span>
+        <span>ייצוא</span>
+    </button>
+</nav>
+
+<!-- Slot Editor Dialog -->
+<dialog id="slot-editor">
+    <form method="dialog">
+        <div class="popover-content">
+            <h4 id="popover-title">שם השדה</h4>
+            <input type="text" id="slot-input" autocomplete="off" placeholder="הקלד כאן...">
+            <div class="slots-visualizer">
+                <!-- Slot boxes injected by JS -->
             </div>
-        </form>
-    </dialog>
+            <div class="overflow-warning" hidden>⚠️ הטקסט ארוך מדי</div>
+        </div>
 
-    <!-- Hidden file inputs for upload buttons -->
-    <input type="file" id="input-pdf" accept=".pdf" hidden>
-    <input type="file" id="input-map" accept=".json" hidden>
+        <div class="popover-actions">
+            <button type="submit" value="clear" class="btn-text">🗑</button>
+            <button type="submit" value="cancel" class="btn-secondary">ביטול</button>
+            <button type="submit" value="confirm" class="btn-primary">אישור</button>
+        </div>
+    </form>
+</dialog>
 
-    <!-- Core Engine -->
-    <script>
-    /* LiveFill v2 | Core Engine */
+<!-- Hidden file inputs -->
+<input type="file" id="input-pdf" accept=".pdf" hidden>
+<input type="file" id="input-map" accept=".json" hidden>
 
-    const AppState = {
-        pdfDoc: null,
-        pageNum: 1,
-        scale: 1.0,              // Zoom level (1.0 = 100%)
-        viewport: null,          // PDF.js viewport (for overlay positioning)
-        mappingData: [],         // fields[] from JSON
-        tablesData: [],          // tables[] from JSON
-        fieldValues: {},         // User input values
-        activeFieldId: null
-    };
+<!-- Core Engine -->
+<script>
+/* LiveFill v2 | Core Engine */
 
-    // ===== Rendering Constants =====
-    const PDF_DPI = 72;        // PDF.js default DPI
-    const RENDER_DPI = 300;    // High-quality render DPI (sharp output)
+const AppState = {
+    pdfDoc: null,
+    pageNum: 1,
+    scale: 1.0,
+    viewport: null,
+    mappingData: [],
+    tablesData: [],
+    fieldValues: {},
+    activeFieldId: null,
+    isMobile: window.innerWidth < 768
+};
 
-    // אלמנטים ב-DOM
-    const els = {
-        canvasContainer: document.getElementById('canvas-container'),
-        pdfImage: document.getElementById('pdf-render'),  // Now an <img>, not canvas
-        overlay: document.getElementById('fields-overlay'),
-        zoomSelect: document.getElementById('zoom-control'),
-        fieldList: document.querySelector('.field-list'),
-        slotDialog: document.getElementById('slot-editor'),
-        slotInput: document.getElementById('slot-input'),
-        popoverTitle: document.getElementById('popover-title'),
-        btnExport: document.getElementById('btn-export'),
-        emptyState: document.getElementById('empty-state')
-    };
+const PDF_DPI = 72;
+const RENDER_DPI = 300;
 
-    /* --- 1. אתחול והעלאת קבצים --- */
+// DOM Elements
+const els = {
+    canvasContainer: document.getElementById('canvas-container'),
+    pdfImage: document.getElementById('pdf-render'),
+    overlay: document.getElementById('fields-overlay'),
+    zoomSelect: document.getElementById('zoom-control'),
+    fieldList: document.querySelector('.field-list'),
+    slotDialog: document.getElementById('slot-editor'),
+    slotInput: document.getElementById('slot-input'),
+    popoverTitle: document.getElementById('popover-title'),
+    btnExport: document.getElementById('btn-export'),
+    emptyState: document.getElementById('empty-state'),
+    // Mobile elements
+    sidebar: document.getElementById('sidebar'),
+    sidebarClose: document.getElementById('sidebar-close'),
+    sheetBackdrop: document.getElementById('sheet-backdrop'),
+    navFields: document.getElementById('nav-fields'),
+    navZoomIn: document.getElementById('nav-zoom-in'),
+    navZoomOut: document.getElementById('nav-zoom-out'),
+    navExport: document.getElementById('nav-export')
+};
 
-    document.addEventListener('DOMContentLoaded', () => {
-        // חיבור כפתורי העלאה
-        setupUploadButton('btn-upload-pdf', 'input-pdf', handlePdfUpload);
-        setupUploadButton('btn-upload-map', 'input-map', handleMapUpload);
-        
-        // Zoom via CSS transform only - NO re-render!
-        els.zoomSelect.addEventListener('change', (e) => {
-            AppState.scale = parseFloat(e.target.value);
-            applyZoom(AppState.scale);
-        });
+/* --- Mobile Detection & Resize Handling --- */
+function updateMobileState() {
+    AppState.isMobile = window.innerWidth < 768;
+}
 
-        // חיבור דיאלוג (שמירה ביציאה)
-        els.slotDialog.addEventListener('close', handleDialogClose);
+window.addEventListener('resize', () => {
+    updateMobileState();
+    // Close sidebar if switching to desktop
+    if (!AppState.isMobile) {
+        closeSidebar();
+    }
+});
+
+/* --- Sidebar (Bottom Sheet on Mobile) --- */
+function openSidebar() {
+    els.sidebar.classList.add('open');
+    els.sheetBackdrop.classList.add('visible');
+    els.navFields.classList.add('active');
+}
+
+function closeSidebar() {
+    els.sidebar.classList.remove('open');
+    els.sheetBackdrop.classList.remove('visible');
+    els.navFields.classList.remove('active');
+}
+
+function toggleSidebar() {
+    if (els.sidebar.classList.contains('open')) {
+        closeSidebar();
+    } else {
+        openSidebar();
+    }
+}
+
+/* --- 1. Initialization --- */
+document.addEventListener('DOMContentLoaded', () => {
+    updateMobileState();
+
+    // Upload buttons
+    setupUploadButton('btn-upload-pdf', 'input-pdf', handlePdfUpload);
+    setupUploadButton('btn-upload-map', 'input-map', handleMapUpload);
+    
+    // Desktop zoom
+    els.zoomSelect.addEventListener('change', (e) => {
+        AppState.scale = parseFloat(e.target.value);
+        applyZoom(AppState.scale);
     });
 
-    function setupUploadButton(btnId, inputId, handler) {
-        const btn = document.getElementById(btnId);
-        const input = document.getElementById(inputId);
-        btn.addEventListener('click', () => input.click());
-        input.addEventListener('change', handler);
-    }
+    // Mobile navigation
+    els.navFields.addEventListener('click', toggleSidebar);
+    els.sidebarClose.addEventListener('click', closeSidebar);
+    els.sheetBackdrop.addEventListener('click', closeSidebar);
 
-    /* --- 2. מנוע PDF --- */
+    // Mobile zoom buttons
+    els.navZoomIn.addEventListener('click', () => {
+        const newScale = Math.min(3, AppState.scale + 0.5);
+        AppState.scale = newScale;
+        applyZoom(newScale);
+    });
 
-    async function handlePdfUpload(e) {
-        const file = e.target.files[0];
-        if (!file) return;
+    els.navZoomOut.addEventListener('click', () => {
+        const newScale = Math.max(0.5, AppState.scale - 0.5);
+        AppState.scale = newScale;
+        applyZoom(newScale);
+    });
 
-        const fileReader = new FileReader();
-        fileReader.onload = async function() {
-            const typedarray = new Uint8Array(this.result);
-            AppState.pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
-            
-            // הסתרת Empty State
-            els.emptyState.style.display = 'none';
+    // Dialog close handler
+    els.slotDialog.addEventListener('close', handleDialogClose);
 
-            // טוען דף ראשון אוטומטית
-            AppState.pageNum = 1;
-            await renderPage();
+    // Swipe down to close sidebar (simple implementation)
+    let touchStartY = 0;
+    els.sidebar.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
 
-            // Render overlays only if mapping JSON was already loaded
-            if (AppState.mappingData.length > 0) {
+    els.sidebar.addEventListener('touchmove', (e) => {
+        const touchY = e.touches[0].clientY;
+        const diff = touchY - touchStartY;
+        if (diff > 80) {
+            closeSidebar();
+        }
+    }, { passive: true });
+});
+
+function setupUploadButton(btnId, inputId, handler) {
+    const btn = document.getElementById(btnId);
+    const input = document.getElementById(inputId);
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', handler);
+}
+
+/* --- 2. PDF Engine --- */
+async function handlePdfUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const fileReader = new FileReader();
+    fileReader.onload = async function() {
+        const typedarray = new Uint8Array(this.result);
+        AppState.pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+        
+        els.emptyState.style.display = 'none';
+        AppState.pageNum = 1;
+        await renderPage();
+
+        if (AppState.mappingData.length > 0) {
+            renderOverlayFields();
+            renderSidebarList();
+        }
+    };
+    fileReader.readAsArrayBuffer(file);
+}
+
+function applyZoom(zoom) {
+    els.canvasContainer.style.transform = `scale(${zoom})`;
+    els.canvasContainer.style.transformOrigin = 'top center';
+}
+
+async function renderPage() {
+    if (!AppState.pdfDoc) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const page = await AppState.pdfDoc.getPage(AppState.pageNum);
+
+    const displayViewport = page.getViewport({ scale: 1.0 });
+    AppState.viewport = displayViewport;
+
+    const renderScale = RENDER_DPI / PDF_DPI;
+    const renderViewport = page.getViewport({ scale: renderScale });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(renderViewport.width * dpr);
+    canvas.height = Math.floor(renderViewport.height * dpr);
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    await page.render({
+        canvasContext: ctx,
+        viewport: renderViewport
+    }).promise;
+
+    const dataUrl = canvas.toDataURL('image/png');
+    els.pdfImage.src = dataUrl;
+
+    els.pdfImage.style.width = displayViewport.width + 'px';
+    els.pdfImage.style.height = displayViewport.height + 'px';
+
+    els.canvasContainer.style.width = displayViewport.width + 'px';
+    els.canvasContainer.style.height = displayViewport.height + 'px';
+
+    renderOverlayFields();
+    applyZoom(AppState.scale);
+}
+
+/* --- 3. Mapping Engine (Overlay) --- */
+function handleMapUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const json = JSON.parse(event.target.result);
+            AppState.mappingData = json.fields || [];
+            AppState.tablesData = json.tables || [];
+
+            console.log(`Loaded mapping: ${AppState.mappingData.length} fields, ${AppState.tablesData.length} tables`);
+
+            if (AppState.viewport) {
                 renderOverlayFields();
-                renderSidebarList();
             }
-        };
-        fileReader.readAsArrayBuffer(file);
-    }
+            renderSidebarList();
 
-    /**
-     * Apply zoom via CSS transform - NO re-rendering!
-     */
-    function applyZoom(zoom) {
-        els.canvasContainer.style.transform = `scale(${zoom})`;
-        els.canvasContainer.style.transformOrigin = 'top center';
-    }
+        } catch (err) {
+            alert('שגיאה בטעינת קובץ המיפוי');
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
+}
 
-    /**
-     * Render PDF ONCE at 300 DPI - called only on PDF load, never on zoom
-     */
-    async function renderPage() {
-        if (!AppState.pdfDoc) return;
+function renderOverlayFields() {
+    els.overlay.innerHTML = '';
 
-        const dpr = window.devicePixelRatio || 1;
-        const page = await AppState.pdfDoc.getPage(AppState.pageNum);
+    if (!AppState.viewport) return;
 
-        // Display viewport at scale 1.0 - for CSS size and overlay positioning
-        const displayViewport = page.getViewport({ scale: 1.0 });
-        AppState.viewport = displayViewport;
+    const vpWidth = AppState.viewport.width;
+    const vpHeight = AppState.viewport.height;
 
-        // Render viewport at 300 DPI for sharp output
-        const renderScale = RENDER_DPI / PDF_DPI;  // 300/72 = 4.17
-        const renderViewport = page.getViewport({ scale: renderScale });
+    AppState.mappingData
+        .filter(field => (field.page || 1) === AppState.pageNum)
+        .forEach(field => {
+            const bbox = field.bbox;
+            if (!bbox || bbox.length < 4) return;
 
-        // Canvas at render resolution × dpr
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(renderViewport.width * dpr);
-        canvas.height = Math.floor(renderViewport.height * dpr);
+            const [bx, by, bw, bh] = bbox;
 
-        const ctx = canvas.getContext('2d');
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const el = document.createElement('div');
+            el.className = `lf-field ${getFieldStatusClass(field.id)}`;
+            el.dataset.fieldId = field.id;
 
-        await page.render({
-            canvasContext: ctx,
-            viewport: renderViewport
-        }).promise;
+            el.style.left   = `${bx * vpWidth}px`;
+            el.style.top    = `${(1 - by - bh) * vpHeight}px`;
+            el.style.width  = `${bw * vpWidth}px`;
+            el.style.height = `${bh * vpHeight}px`;
 
-        // Convert to PNG and display
-        const dataUrl = canvas.toDataURL('image/png');
-        els.pdfImage.src = dataUrl;
+            const value = AppState.fieldValues[field.id] || '';
+            el.innerText = value;
 
-        // CSS size = display viewport (NOT render viewport)
-        els.pdfImage.style.width = displayViewport.width + 'px';
-        els.pdfImage.style.height = displayViewport.height + 'px';
+            const fontSizePx = Math.max(10, bh * vpHeight * 0.7);
+            el.style.fontSize = `${fontSizePx}px`;
 
-        // Container matches display viewport
-        els.canvasContainer.style.width = displayViewport.width + 'px';
-        els.canvasContainer.style.height = displayViewport.height + 'px';
+            el.onclick = () => openFieldEditor(field);
+            els.overlay.appendChild(el);
+        });
 
-        renderOverlayFields();
+    // Tables
+    if (AppState.tablesData) {
+        AppState.tablesData
+            .filter(table => (table.page || 1) === AppState.pageNum)
+            .forEach(table => {
+                if (!table.rows) return;
+                table.rows.forEach((row, rowIndex) => {
+                    Object.keys(row).forEach(colKey => {
+                        const cell = row[colKey];
+                        if (!cell || !cell.bbox) return;
 
-        // Apply initial zoom
-        applyZoom(AppState.scale);
-    }
+                        const [cx, cy, cw, ch] = cell.bbox;
 
-    /* --- 3. מנוע מיפוי (Overlay) --- */
+                        const cellEl = document.createElement('div');
+                        cellEl.className = 'lf-field table-cell';
+                        cellEl.dataset.tableId = table.id || table.tableId;
+                        cellEl.dataset.rowIndex = rowIndex;
+                        cellEl.dataset.colKey = colKey;
 
-    function handleMapUpload(e) {
-        const file = e.target.files[0];
-        if (!file) return;
+                        cellEl.style.left   = `${cx * vpWidth}px`;
+                        cellEl.style.top    = `${(1 - cy - ch) * vpHeight}px`;
+                        cellEl.style.width  = `${cw * vpWidth}px`;
+                        cellEl.style.height = `${ch * vpHeight}px`;
 
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const json = JSON.parse(event.target.result);
+                        const tableId = table.id || table.tableId;
+                        const cellValue = AppState.fieldValues?.tables?.[tableId]?.[rowIndex]?.[colKey] || '';
+                        cellEl.innerText = cellValue;
 
-                // Parse fields array
-                AppState.mappingData = json.fields || [];
+                        const fontSizePx = Math.max(8, ch * vpHeight * 0.7);
+                        cellEl.style.fontSize = `${fontSizePx}px`;
 
-                // Parse tables array
-                AppState.tablesData = json.tables || [];
-
-                console.log(`Loaded mapping: ${AppState.mappingData.length} fields, ${AppState.tablesData.length} tables`);
-
-                // Render if PDF is already loaded
-                if (AppState.viewport) {
-                    renderOverlayFields();
-                }
-                renderSidebarList();
-
-            } catch (err) {
-                alert('שגיאה בטעינת קובץ המיפוי');
-                console.error(err);
-            }
-        };
-        reader.readAsText(file);
-    }
-
-    function renderOverlayFields() {
-        els.overlay.innerHTML = '';
-
-        if (!AppState.viewport) return;
-
-        // Viewport dimensions for positioning (CSS pixels)
-        const vpWidth = AppState.viewport.width;
-        const vpHeight = AppState.viewport.height;
-
-        // Render fields for current page only
-        AppState.mappingData
-            .filter(field => (field.page || 1) === AppState.pageNum)
-            .forEach(field => {
-                // bbox is normalized [x, y, w, h] in range 0..1
-                // PDF coordinate system: Y=0 at BOTTOM
-                // CSS coordinate system: Y=0 at TOP
-                const bbox = field.bbox;
-                if (!bbox || bbox.length < 4) return;
-
-                const [bx, by, bw, bh] = bbox;
-
-                const el = document.createElement('div');
-                el.className = `lf-field ${getFieldStatusClass(field.id)}`;
-                el.dataset.fieldId = field.id;
-
-                // Convert normalized bbox → CSS pixels
-                // X: direct mapping
-                // Y: flip from bottom-origin to top-origin
-                el.style.left   = `${bx * vpWidth}px`;
-                el.style.top    = `${(1 - by - bh) * vpHeight}px`;
-                el.style.width  = `${bw * vpWidth}px`;
-                el.style.height = `${bh * vpHeight}px`;
-
-                // Content
-                const value = AppState.fieldValues[field.id] || '';
-                el.innerText = value;
-
-                // Font size scaled to field height
-                const fontSizePx = Math.max(10, bh * vpHeight * 0.7);
-                el.style.fontSize = `${fontSizePx}px`;
-
-                el.onclick = () => openFieldEditor(field);
-                els.overlay.appendChild(el);
-            });
-
-        // Render table cells for current page
-        if (AppState.tablesData) {
-            AppState.tablesData
-                .filter(table => (table.page || 1) === AppState.pageNum)
-                .forEach(table => {
-                    if (!table.rows) return;
-                    table.rows.forEach((row, rowIndex) => {
-                        // Each row has column keys with bbox values
-                        Object.keys(row).forEach(colKey => {
-                            const cell = row[colKey];
-                            if (!cell || !cell.bbox) return;
-
-                            const [cx, cy, cw, ch] = cell.bbox;
-
-                            const cellEl = document.createElement('div');
-                            cellEl.className = 'lf-field table-cell';
-                            cellEl.dataset.tableId = table.id || table.tableId;
-                            cellEl.dataset.rowIndex = rowIndex;
-                            cellEl.dataset.colKey = colKey;
-
-                            // Y flipped from PDF (bottom-origin) to CSS (top-origin)
-                            cellEl.style.left   = `${cx * vpWidth}px`;
-                            cellEl.style.top    = `${(1 - cy - ch) * vpHeight}px`;
-                            cellEl.style.width  = `${cw * vpWidth}px`;
-                            cellEl.style.height = `${ch * vpHeight}px`;
-
-                            // Content from stored values
-                            const tableId = table.id || table.tableId;
-                            const cellValue = AppState.fieldValues?.tables?.[tableId]?.[rowIndex]?.[colKey] || '';
-                            cellEl.innerText = cellValue;
-
-                            const fontSizePx = Math.max(8, ch * vpHeight * 0.7);
-                            cellEl.style.fontSize = `${fontSizePx}px`;
-
-                            cellEl.onclick = () => openTableCellEditor(table, rowIndex, colKey);
-                            els.overlay.appendChild(cellEl);
-                        });
+                        cellEl.onclick = () => openTableCellEditor(table, rowIndex, colKey);
+                        els.overlay.appendChild(cellEl);
                     });
                 });
-        }
+            });
     }
+}
 
-    function getFieldStatusClass(id) {
-        if (!AppState.fieldValues[id]) return '';
-        return 'status-filled';
-    }
+function getFieldStatusClass(id) {
+    if (!AppState.fieldValues[id]) return '';
+    return 'status-filled';
+}
 
-    function openTableCellEditor(table, rowIndex, colKey) {
-        // TODO: Implement table cell editor
-        console.log(`Edit table cell: ${table.id || table.tableId}[${rowIndex}][${colKey}]`);
-    }
+function openTableCellEditor(table, rowIndex, colKey) {
+    console.log(`Edit table cell: ${table.id || table.tableId}[${rowIndex}][${colKey}]`);
+}
 
-    /* --- 4. Sidebar Logic --- */
+/* --- 4. Sidebar Logic --- */
+function renderSidebarList() {
+    els.fieldList.innerHTML = '';
 
-    function renderSidebarList() {
-        els.fieldList.innerHTML = '';
+    const pageFields = AppState.mappingData.filter(f => (f.page || 1) === AppState.pageNum);
 
-        // Filter fields for current page
-        const pageFields = AppState.mappingData.filter(f => (f.page || 1) === AppState.pageNum);
+    pageFields.forEach(field => {
+        const li = document.createElement('li');
+        li.className = 'field-item';
+        li.setAttribute('data-field-id', field.id);
 
-        pageFields.forEach(field => {
-            const li = document.createElement('li');
-            li.className = 'field-item';
-            li.setAttribute('data-field-id', field.id);
-
-            const statusIcon = AppState.fieldValues[field.id] ? '✅' : '⬜';
-            const label = field.label_he || field.label || field.name || field.id;
-
-            li.innerHTML = `
-                <span class="field-name">${label}</span>
-                <span class="field-status-icon">${statusIcon}</span>
-            `;
-
-            li.onclick = () => {
-                document.querySelectorAll('.field-item').forEach(item => item.classList.remove('active'));
-                li.classList.add('active');
-                openFieldEditor(field);
-            };
-            els.fieldList.appendChild(li);
-        });
-    }
-
-    /* --- 5. עורך (Popover Logic) --- */
-
-    function openFieldEditor(field) {
-        AppState.activeFieldId = field.id;
+        const statusIcon = AppState.fieldValues[field.id] ? '✓' : '○';
         const label = field.label_he || field.label || field.name || field.id;
-        els.popoverTitle.innerText = label;
-        els.slotInput.value = AppState.fieldValues[field.id] || '';
 
-        els.slotDialog.showModal();
-        setTimeout(() => els.slotInput.focus(), 50);
+        li.innerHTML = `
+            <span class="field-name">${label}</span>
+            <span class="field-status-icon">${statusIcon}</span>
+        `;
+
+        li.onclick = () => {
+            document.querySelectorAll('.field-item').forEach(item => item.classList.remove('active'));
+            li.classList.add('active');
+            openFieldEditor(field);
+            
+            // Close sidebar on mobile after selecting a field
+            if (AppState.isMobile) {
+                closeSidebar();
+            }
+        };
+        els.fieldList.appendChild(li);
+    });
+}
+
+/* --- 5. Editor (Popover Logic) --- */
+function openFieldEditor(field) {
+    AppState.activeFieldId = field.id;
+    const label = field.label_he || field.label || field.name || field.id;
+    els.popoverTitle.innerText = label;
+    els.slotInput.value = AppState.fieldValues[field.id] || '';
+
+    els.slotDialog.showModal();
+    setTimeout(() => els.slotInput.focus(), 50);
+}
+
+function handleDialogClose() {
+    const returnValue = els.slotDialog.returnValue;
+    
+    if (returnValue === 'confirm') {
+        const newVal = els.slotInput.value;
+        AppState.fieldValues[AppState.activeFieldId] = newVal;
+    } else if (returnValue === 'clear') {
+        delete AppState.fieldValues[AppState.activeFieldId];
     }
 
-    function handleDialogClose() {
-        const returnValue = els.slotDialog.returnValue; // 'confirm', 'cancel', 'clear'
-        
-        if (returnValue === 'confirm') {
-            const newVal = els.slotInput.value;
-            AppState.fieldValues[AppState.activeFieldId] = newVal;
-        } else if (returnValue === 'clear') {
-            delete AppState.fieldValues[AppState.activeFieldId];
-        }
-        // ב-cancel לא עושים כלום
+    renderOverlayFields();
+    renderSidebarList();
+    checkExportStatus();
+    
+    els.slotDialog.returnValue = '';
+}
 
-        // עדכון המערכת
-        renderOverlayFields();
-        renderSidebarList();
-        checkExportStatus();
-        
-        // איפוס ה-returnValue לפעם הבאה
-        els.slotDialog.returnValue = '';
-    }
-
-    function checkExportStatus() {
-        // הפעלת כפתור ייצוא רק אם יש לפחות שדה אחד מלא (לוגיקה בסיסית)
-        const hasData = Object.keys(AppState.fieldValues).length > 0;
-        els.btnExport.disabled = !hasData;
-    }
-    </script>
+function checkExportStatus() {
+    const hasData = Object.keys(AppState.fieldValues).length > 0;
+    els.btnExport.disabled = !hasData;
+    els.navExport.disabled = !hasData;
+}
+</script>
+```
 
 </body>
 </html>
